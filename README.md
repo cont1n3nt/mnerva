@@ -1,3 +1,5 @@
+[English](README.md) · [Русский](README.ru.md)
+
 # Latent Code Memory
 
 > **Compact neural representations for repository-level code reasoning**
