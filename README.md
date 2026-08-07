@@ -1,0 +1,1 @@
+Can an LLM answer repository questions from a learned latent memory instead of retrieved source code?
