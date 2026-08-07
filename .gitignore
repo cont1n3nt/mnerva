@@ -85,13 +85,3 @@ htmlcov/
 .nox/
 .mypy_cache/
 .ruff_cache/
-
-# Empty Phase-0 placeholder directories (kept on disk, not tracked)
-/configs/*
-/datasets/*
-/docs/*
-/experiments/*
-/notebooks/*
-/results/*
-/scripts/*
-/src/adaptive_memory/*
