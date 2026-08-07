@@ -2,6 +2,9 @@
 RepositoryKnowledgeCompressionintoNeuralLatentMemory.pdf
 *.pdf
 
+# PLAN.md
+PLAN.md
+
 # Python
 __pycache__/
 *.py[cod]
