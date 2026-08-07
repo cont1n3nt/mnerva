@@ -1,18 +1,18 @@
 [English](README.md) · [Русский](README.ru.md)
 
-# Latent Code Memory
+# Adaptive Code Memory
 
-> **Compact neural representations for repository-level code reasoning**
+> **Heterogeneous memory with adaptive information allocation for repository-level code reasoning**
 
 **Status:** Research / Early Development  
 **Category:** AI / Machine Learning / Code Intelligence / Representation Learning  
-**Focus:** Latent representations, information bottlenecks, code reasoning, LLMs
+**Focus:** Latent representations, heterogeneous memory, information bottlenecks, adaptive compression, code reasoning, LLMs
 
 ---
 
-## Overview
+# Overview
 
-Modern language models can reason about source code surprisingly well, but their ability to work with large codebases is constrained by the amount of information that must be provided through the model's context.
+Modern language models can reason about source code surprisingly well, but large repositories create a fundamental information bottleneck.
 
 A repository may contain tens or hundreds of thousands of tokens:
 
@@ -27,45 +27,72 @@ Repository
 └── documentation
 ```
 
-A conventional approach is to expose relevant parts of this information to an LLM through a large context window, retrieval-augmented generation, or repeated retrieval.
+Traditional systems address this problem through larger context windows, retrieval-augmented generation, code search, graph-based retrieval, or context compression.
 
-This project investigates a different question:
+Another line of research attempts to compress repository information into compact latent representations.
 
-> **Can a large codebase be transformed into a compact latent representation that another language model can use for reasoning without receiving the original source code?**
+This project explores a different hypothesis:
 
-Instead of transmitting the repository as text, an encoder attempts to compress its information into a fixed number of latent tokens.
+> **Repository knowledge is heterogeneous, so it may be fundamentally inefficient to compress all of it into a single representation.**
 
-The resulting representation is then provided to a separate language model that attempts to answer questions about the repository.
+Code contains fundamentally different kinds of information:
+
+```text
+Semantic
+"What does this component mean?"
+
+Structural
+"How are these components connected?"
+
+Symbolic
+"What is the exact function name?"
+
+Behavioral
+"What happens under this condition?"
+
+Literal
+"What is the exact value of this constant?"
+```
+
+These types of information have different properties and may require different representations.
+
+Instead of forcing everything through one compression mechanism, this project investigates a **heterogeneous code memory** consisting of multiple complementary representations.
 
 Conceptually:
 
 ```text
-                    Conventional approach
-
-Repository ──► Text / Retrieval ──► LLM ──► Answer
-
-
-                    Latent approach
-
-Repository
-     │
-     ▼
-Code Encoder
-     │
-     ▼
-Latent Bottleneck
-     │
-     │  fixed number of latent tokens
-     ▼
-Receiver LLM
-     │
-     ▼
-Answer
+                         Repository
+                             │
+                             ▼
+                     Code Understanding
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+          Semantic       Structural      Symbolic
+           Memory          Memory          Memory
+              │              │              │
+              ▼              ▼              ▼
+          Latents          Graph         Exact facts
+              │              │              │
+              └──────────────┼──────────────┘
+                             │
+                             ▼
+                     Adaptive Router
+                             │
+                             ▼
+                    Information Budget
+                             │
+                             ▼
+                        Receiver LLM
+                             │
+                             ▼
+                           Answer
 ```
 
-The purpose is not simply to build another code assistant.
+The central idea is not simply to compress more aggressively.
 
-The purpose is to investigate the **information capacity, behavior and limitations of latent communication for code**.
+The goal is to investigate whether **different types of repository knowledge should be compressed, stored, and transmitted differently**.
 
 ---
 
@@ -73,301 +100,568 @@ The purpose is to investigate the **information capacity, behavior and limitatio
 
 The central research question is:
 
-> **How much repository-level information can be preserved in a fixed-size latent representation, and how effectively can a separate language model recover and reason over that information without access to the original code text?**
+> **Can heterogeneous semantic, structural, and symbolic memory preserve more task-relevant repository information than monolithic compression when both systems operate under the same information budget?**
 
-This question contains several smaller questions:
+This leads to several subquestions:
 
-- How does performance change as the number of latent tokens changes?
-- Which types of code knowledge survive compression?
-- Which types of information are lost first?
-- Can semantic information be preserved more efficiently than exact identifiers?
-- Does the receiver actually decode information from the latent representation?
-- How much does the receiver's pretrained knowledge influence its answers?
-- How does latent communication compare with text-based and retrieval-based approaches?
-- Is there a useful point on the trade-off between compression and reasoning quality?
+- Does heterogeneous memory outperform a single latent bottleneck?
+- Which types of code knowledge benefit from which representation?
+- Can semantic information be stored efficiently in continuous latent representations?
+- Is structural information better represented explicitly as a graph?
+- Is exact symbolic information better preserved deterministically?
+- Can a learned router dynamically allocate memory according to the question?
+- Can the system use progressively more information only when necessary?
+- Does adaptive allocation improve information efficiency?
+- Does the learned memory transfer between different receiver models?
+- Can counterfactual experiments verify that answers actually depend on the stored memory?
+- How much performance can be obtained per unit of information budget?
 
 ---
 
 # Motivation
 
-Large codebases create a fundamental tension.
+Large codebases contain different kinds of information that behave very differently under compression.
 
-More context provides more information, but processing more context increases computational cost and can introduce additional challenges.
+Consider the following function:
 
-A repository might contain:
-
-```text
-100,000+ text tokens
+```python
+def authenticate_user(token):
+    if not verify_signature(token):
+        raise AuthenticationError()
+    return get_user_from_token(token)
 ```
 
-while many questions require only a small fraction of that information.
+A system may need to answer:
 
-A conventional system therefore attempts to select relevant information.
+> What does this function do?
 
-This project asks whether a different strategy is possible:
+This primarily requires **semantic information**.
 
-```text
-Large repository
-       │
-       ▼
-learned compression
-       │
-       ▼
-small latent representation
-       │
-       ▼
-reasoning model
-```
+But another question might be:
 
-If successful, this could provide a new way of thinking about persistent code memory:
+> Which function does `authenticate_user()` call?
 
-> Instead of repeatedly retrieving and transmitting pieces of a codebase, a system could maintain a compact learned representation of the repository.
+This requires **structural information**.
 
-However, this comes with a fundamental problem:
+Another question:
 
-> **Compression is not the same as understanding.**
+> What is the exact name of the exception?
 
-A representation can be extremely compact while losing the exact information required for reliable reasoning.
+This requires **symbolic information**.
 
-Understanding this trade-off is therefore at least as important as achieving a high compression ratio.
+And:
+
+> What happens when signature verification fails?
+
+This requires **behavioral information**.
+
+A single latent representation must implicitly encode all of these.
+
+That may be possible, but it may not be optimal.
+
+The central hypothesis of this project is therefore:
+
+> **The information structure of software is heterogeneous, and memory architecture should reflect that heterogeneity.**
 
 ---
 
 # Core Hypothesis
 
-The initial hypothesis is:
+The primary hypothesis is:
 
-> **A sufficiently trained encoder can transform repository-level code into a compact latent representation that preserves enough semantic and structural information for a separate language model to perform useful code reasoning without access to the original source text.**
+> **Under a fixed information budget, an adaptive heterogeneous memory that distributes capacity between semantic, structural, and symbolic representations will preserve more task-relevant information than a monolithic latent representation or uniform compression strategy.**
 
-More specifically, we expect that different types of information will have different resistance to compression.
+The hypothesis can be represented as:
+
+```text
+                    Fixed Information Budget
+                              │
+             ┌────────────────┼────────────────┐
+             ▼                ▼                ▼
+         Semantic         Structural        Symbolic
+          Memory            Memory            Memory
+             │                │                │
+             └────────────────┼────────────────┘
+                              ▼
+                       Adaptive Allocation
+                              │
+                              ▼
+                         Receiver LLM
+```
+
+The system does not assume that every question requires the same kind of information.
 
 For example:
 
 ```text
-Repository information
+Question:
+"How does authentication work?"
 
-Semantic concepts       ───────────────► potentially robust
-Architecture            ───────────────► potentially robust
-Relationships            ───────────────► potentially robust
-Control flow             ───────────────► uncertain
-Exact identifiers       ───────────────► potentially fragile
-Exact literals           ───────────────► potentially fragile
-Rare implementation     ───────────────► potentially fragile
+Semantic      ████████████████████
+Structural    █████
+Symbolic      ██
 ```
 
-This is a hypothesis, not an expected result.
+while:
 
-The experiments may demonstrate that the hypothesis is wrong.
+```text
+Question:
+"Where is validate_token() called?"
 
-That result would still be scientifically useful.
+Semantic      ███
+Structural    ████████████████████
+Symbolic      ████
+```
+
+and:
+
+```text
+Question:
+"What is the exact timeout constant?"
+
+Semantic      █
+Structural    ██
+Symbolic      █████████████████████
+```
+
+The allocation above is illustrative rather than a predetermined design.
+
+The experiments must determine whether such specialization is actually beneficial.
 
 ---
 
-# The Latent Bottleneck
+# Important Research Position
 
-The central component of the research is a fixed-size latent bottleneck.
+This project does **not** assume that latent memory is inherently superior to retrieval.
 
-Instead of passing:
+Recent work has already demonstrated that repository-level context compression can be approached through multiple paradigms, including discrete token compression, continuous latent representations, and other compressed representations.
+
+Similarly, adaptive code compression and repository-aware retrieval are active research areas.
+
+Therefore, the goal is not:
+
+> "We invented code compression."
+
+Nor:
+
+> "Latent representations replace RAG."
+
+Instead, the project investigates a narrower question:
+
+> **Does representing different classes of code knowledge differently provide an advantage when the total information budget is constrained?**
+
+This distinction is central to the research.
+
+---
+
+# What Is Heterogeneous Code Memory?
+
+The proposed memory consists of several complementary components.
+
+## 1. Semantic Memory
+
+Semantic memory attempts to capture high-level meaning.
+
+Potential information includes:
+
+- what a function does;
+- what a module is responsible for;
+- the purpose of a component;
+- high-level behavior;
+- conceptual relationships;
+- implementation intent.
+
+A possible representation is a learned continuous latent memory:
 
 ```text
-N text tokens
+Code
+ │
+ ▼
+Semantic Encoder
+ │
+ ▼
+z₁ z₂ z₃ ... zₖ
 ```
 
-the encoder produces:
+The representation does not need to correspond directly to textual tokens.
+
+---
+
+# 2. Structural Memory
+
+Structural memory represents relationships between components.
+
+Examples include:
 
 ```text
-K latent tokens
+imports
+calls
+inherits
+implements
+references
+depends_on
+contains
+```
+
+Conceptually:
+
+```text
+A ──calls──► B
+B ──imports─► C
+D ──inherits► A
+```
+
+A graph representation can preserve information that may be unnecessarily expensive to encode into continuous latent vectors.
+
+Possible structural memory:
+
+```text
+Repository
+    │
+    ▼
+AST / static analysis
+    │
+    ▼
+Code Graph
+    │
+    ▼
+Graph Representation
+```
+
+The exact implementation is an experimental variable.
+
+---
+
+# 3. Symbolic Memory
+
+Symbolic memory stores information where exactness matters.
+
+Examples:
+
+```text
+function names
+class names
+argument counts
+types
+constants
+literals
+file paths
+imports
+line references
+```
+
+For example:
+
+```text
+{
+    "function": "validate_token",
+    "arity": 2,
+    "file": "auth/token.py"
+}
+```
+
+A key design principle is:
+
+> **Do not force a neural network to approximate information that a deterministic program can preserve exactly.**
+
+For supported languages, AST or compiler tooling may provide a deterministic source of symbolic facts.
+
+However, symbolic memory itself can still be compressed or selectively stored under a limited budget.
+
+---
+
+# 4. Behavioral Memory
+
+Behavioral information sits between semantic and structural representations.
+
+Examples:
+
+```text
+condition
+    ↓
+branch
+    ↓
+side effect
+    ↓
+exception / return value
+```
+
+A possible future extension is to explicitly model control-flow or behavioral representations.
+
+This component is intentionally not assumed to be necessary from the beginning.
+
+The research should determine whether behavioral knowledge is adequately captured by semantic and structural memory.
+
+---
+
+# Why Not Just Use One Encoder?
+
+A monolithic architecture looks like:
+
+```text
+Repository
+    │
+    ▼
+Encoder
+    │
+    ▼
+128 latent units
+    │
+    ▼
+LLM
+```
+
+This has a simple interface, but the same latent capacity must encode:
+
+```text
+meaning
+structure
+identifiers
+literals
+relationships
+behavior
+```
+
+The proposed architecture instead treats the repository as a collection of different information types:
+
+```text
+Repository
+    │
+    ├──► Semantic Memory
+    │
+    ├──► Structural Memory
+    │
+    └──► Symbolic Memory
+```
+
+The research question is whether this decomposition provides better information efficiency.
+
+---
+
+# Adaptive Information Budget
+
+The most important component of the proposed system is the **adaptive information budget**.
+
+Suppose the total memory budget is:
+
+```text
+B = 128 units
+```
+
+A conventional system might always allocate:
+
+```text
+Semantic      64
+Structural    32
+Symbolic      32
+```
+
+regardless of the question.
+
+Our proposed system allows the allocation to change.
+
+For example:
+
+```text
+Question A
+
+Semantic      80
+Structural    32
+Symbolic      16
+```
+
+and:
+
+```text
+Question B
+
+Semantic      24
+Structural    88
+Symbolic      16
+```
+
+The total remains:
+
+```text
+80 + 32 + 16 = 128
+
+24 + 88 + 16 = 128
+```
+
+The important constraint is therefore:
+
+> **The total information budget remains fixed.**
+
+Only its allocation changes.
+
+---
+
+# Query-Aware Routing
+
+The router receives the question and determines which memory components are likely to be useful.
+
+Conceptually:
+
+```text
+                 Question
+                    │
+                    ▼
+              Query Encoder
+                    │
+                    ▼
+             Allocation Router
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+   Semantic     Structural    Symbolic
+    budget        budget        budget
+```
+
+The router should not simply choose one memory.
+
+It should potentially allocate a continuous budget between several memory types.
+
+For example:
+
+```text
+B = 128
+
+Semantic:      72
+Structural:    40
+Symbolic:      16
+```
+
+The exact routing mechanism is an open research question.
+
+---
+
+# Progressive Information Disclosure
+
+A further extension is to make the information budget dynamic over time.
+
+Instead of immediately providing the full memory:
+
+```text
+128 units
+```
+
+the receiver could initially receive:
+
+```text
+16 units
+```
+
+If the answer remains uncertain, additional information could be requested:
+
+```text
+16 → 32 → 64 → 128
+```
+
+Conceptually:
+
+```text
+Question
+   │
+   ▼
+Small Memory
+   │
+   ▼
+Receiver
+   │
+   ├── sufficient ──► Answer
+   │
+   └── insufficient
+           │
+           ▼
+       More Memory
+           │
+           ▼
+        Receiver
+```
+
+This introduces a second optimization objective:
+
+> **How much information does the model actually need to answer a given question?**
+
+This could potentially reduce average information usage even when the maximum budget remains large.
+
+---
+
+# Latent Memory
+
+Continuous latent representations remain an important component of the project.
+
+A semantic encoder may produce:
+
+```text
+z₁ z₂ z₃ ... zₖ
 ```
 
 where:
 
 ```text
-K << N
+k << number of source tokens
 ```
 
-For example:
+The latent representation acts as a learned communication channel.
+
+However, the project explicitly avoids assuming that all information should pass through this channel.
+
+Instead:
 
 ```text
-Repository
-100,000 text tokens
-        │
-        ▼
-     Encoder
-        │
-        ▼
-  128 latent tokens
-        │
-        ▼
-   Receiver LLM
-```
-
-The important property is that `K` can be controlled independently of repository size.
-
-This allows us to study the relationship between:
-
-```text
-Compression
-     ↕
-Information retention
-     ↕
-Reasoning quality
-```
-
----
-
-# What Is a Latent Token?
-
-A conventional language-model token corresponds to a piece of text.
-
-For example:
-
-```text
-def authenticate(user):
-```
-
-is converted by a tokenizer into a sequence of discrete tokens.
-
-A latent token is fundamentally different.
-
-It is a learned continuous vector used as part of an internal representation.
-
-It does not need to correspond to:
-
-```text
-"def"
-"authenticate"
-"user"
-```
-
-Instead, information can be distributed across many latent vectors.
-
-Conceptually:
-
-```text
-Code
- │
- ▼
-Encoder
- │
- ▼
-z₁  z₂  z₃  ...  zₖ
-```
-
-These vectors form the communication channel between the encoder and receiver.
-
-The research question is therefore not:
-
-> "Can we store the text in fewer tokens?"
-
-but:
-
-> **"Can a learned latent representation preserve task-relevant information without explicitly preserving the original textual representation?"**
-
----
-
-# Encoder and Receiver
-
-The project uses two conceptually separate components.
-
-## Encoder
-
-The encoder receives source code and transforms it into a fixed-size latent representation.
-
-```text
-Code
- │
- ▼
-Encoder
- │
- ▼
+Semantic knowledge
+        ↓
 Latent representation
+
+Structural knowledge
+        ↓
+Graph representation
+
+Exact symbolic knowledge
+        ↓
+Symbolic representation
 ```
 
-The encoder is responsible for extracting information from the repository.
-
-## Receiver
-
-The receiver receives only the latent representation and the question.
-
-```text
-Latent representation
-          +
-       Question
-          │
-          ▼
-     Receiver LLM
-          │
-          ▼
-        Answer
-```
-
-The receiver does not receive the original repository text during inference.
-
-This separation is important.
-
-It allows us to study whether the latent representation itself contains useful information.
+This is the main conceptual difference from monolithic latent compression.
 
 ---
 
-# Why Use Two Models?
+# Information Budget as a Common Currency
 
-Using separate encoder and receiver models creates an explicit communication problem.
+A major experimental challenge is comparing different memory types fairly.
 
-The encoder must learn:
+A graph, a latent vector, and an exact symbolic sidecar do not naturally have the same unit of size.
 
-> What information should be transmitted?
+The project therefore needs an explicit definition of **information budget**.
 
-The receiver must learn:
+Possible measures include:
 
-> How should the transmitted representation be interpreted?
+- serialized token count;
+- bytes;
+- number of latent vectors;
+- number of graph edges/nodes;
+- number of symbolic facts;
+- model input cost;
+- learned communication units.
 
-This is conceptually similar to communication through a constrained channel:
+The exact budget definition is itself an important methodological decision.
 
-```text
-Source
-  │
-  ▼
-Encoder
-  │
-  ▼
-──── LATENT CHANNEL ────
-  │
-  ▼
-Receiver
-  │
-  ▼
-Prediction
-```
-
-The number of latent tokens acts as a limitation on the communication channel.
+The final benchmark should report multiple resource measures rather than relying on a single arbitrary number.
 
 ---
 
-# What We Want to Measure
+# Evaluation Dimensions
 
-The project will not be evaluated using a single accuracy number.
+The project should not be evaluated using a single accuracy score.
 
-We want to study several dimensions.
+We want to measure at least four dimensions.
 
-## 1. Reasoning quality
+## 1. Task Performance
 
-Can the receiver correctly answer questions about the repository?
+Can the receiver answer questions correctly?
 
-Examples:
-
-- What does a function do?
-- How are components connected?
-- Where is authentication implemented?
-- What happens under a specific condition?
-- Which module is responsible for a particular behavior?
-
----
-
-## 2. Information retention
-
-Which types of information survive compression?
-
-We can categorize questions into groups such as:
+Possible task categories:
 
 ```text
 Semantic
@@ -379,69 +673,79 @@ Identifier
 Literal
 ```
 
-This allows us to construct an information-retention profile.
+---
+
+## 2. Information Efficiency
+
+How much performance is obtained per unit of information?
+
+A simple conceptual metric is:
+
+```text
+Information Efficiency =
+Task Performance / Information Budget
+```
+
+The exact metric will be refined after establishing reliable evaluation methodology.
 
 ---
 
-## 3. Compression
+## 3. Adaptive Allocation Efficiency
 
-How much textual information is represented by the latent bottleneck?
+Does the router allocate more budget to the memory type actually needed by the task?
 
 For example:
 
 ```text
-100,000 input tokens
-        ↓
-128 latent tokens
+Question type       Actual useful memory
+
+Semantic            Semantic
+Call graph          Structural
+Exact identifier    Symbolic
 ```
 
-This corresponds to an extremely strong compression ratio.
-
-But compression alone is not considered success.
-
-The important quantity is:
-
-> **useful information retained per latent token.**
+This can be evaluated using controlled synthetic and real-world tasks.
 
 ---
 
-## 4. Efficiency
+## 4. Computational Efficiency
 
-We can measure:
+Measure:
 
-- context size;
-- inference latency;
-- memory usage;
-- computational cost;
+- input tokens;
+- memory size;
+- latency;
 - throughput;
+- GPU memory;
 - encoder cost;
-- receiver cost.
+- receiver cost;
+- total inference cost.
 
-This allows us to evaluate whether latent communication has practical advantages.
+The project should distinguish **information efficiency** from **wall-clock efficiency**.
+
+A method may be information-efficient while being computationally expensive.
 
 ---
 
 # Baselines
 
-A latent system is meaningless without comparison.
+The project requires strong baselines.
 
-The project should therefore compare against progressively stronger baselines.
+## Baseline 1 — Full Context
 
-### Full-context baseline
-
-Give the model the relevant source code directly.
+The receiver receives the relevant source code directly.
 
 ```text
 Code ──► LLM
 ```
 
-This provides a reference for maximum available textual information.
+This provides an upper-bound-style reference for available textual information.
 
 ---
 
-### Retrieval baseline
+# Baseline 2 — Standard Retrieval
 
-Use a conventional retrieval system.
+A conventional repository retrieval pipeline:
 
 ```text
 Repository
@@ -450,77 +754,363 @@ Repository
 Retriever
     │
     ▼
-Relevant chunks
+Relevant code
     │
     ▼
 LLM
 ```
 
-This represents a practical code-intelligence approach.
+Possible retrieval strategies can include lexical, embedding-based, or hybrid retrieval.
 
 ---
 
-### Embedding baseline
+# Baseline 3 — Context Compression
 
-Use conventional vector representations without a learned generative latent communication mechanism.
-
-This helps determine whether the proposed architecture actually provides something beyond ordinary embeddings.
-
----
-
-### Latent baseline
-
-Use the proposed encoder → latent bottleneck → receiver pipeline.
+Use an existing code/context compression method.
 
 ```text
 Repository
     │
     ▼
-Encoder
+Compressor
     │
     ▼
-Latent tokens
+Compressed text
+    │
+    ▼
+LLM
+```
+
+This tests whether the proposed representation is better than simply selecting or compressing textual tokens.
+
+---
+
+# Baseline 4 — Monolithic Latent Memory
+
+A single encoder produces one latent representation:
+
+```text
+Repository
+    │
+    ▼
+Single Encoder
+    │
+    ▼
+K latent units
+    │
+    ▼
+LLM
+```
+
+This is the most important architectural baseline.
+
+---
+
+# Baseline 5 — Static Hybrid Memory
+
+Use multiple memory types but with a fixed allocation:
+
+```text
+Semantic       64
+Structural     32
+Symbolic       32
+```
+
+This isolates the contribution of adaptive routing.
+
+---
+
+# Baseline 6 — Adaptive Heterogeneous Memory
+
+The proposed approach:
+
+```text
+Semantic
+Structural
+Symbolic
+    │
+    ▼
+Adaptive Router
+    │
+    ▼
+Fixed total budget
     │
     ▼
 Receiver
 ```
 
-The comparison between these systems is more important than the absolute score of any individual system.
+The key comparison becomes:
+
+> **Does adaptive allocation outperform static allocation when total information is held constant?**
 
 ---
 
-# Main Experimental Variable
+# Main Experimental Matrix
 
-The primary experimental variable is the size of the latent bottleneck.
+The core experiment should compare:
+
+```text
+A. Full Context
+
+B. Retrieval
+
+C. Text Compression
+
+D. Monolithic Latent
+
+E. Static Hybrid
+
+F. Adaptive Hybrid
+```
+
+under controlled information budgets.
 
 For example:
 
 ```text
-16 tokens
-32 tokens
-64 tokens
-128 tokens
-256 tokens
-512 tokens
+              Low Budget   Medium Budget   High Budget
+
+Full Context       -             -              ✓
+Retrieval          ✓             ✓              ✓
+Compression        ✓             ✓              ✓
+Latent             ✓             ✓              ✓
+Static Hybrid      ✓             ✓              ✓
+Adaptive Hybrid    ✓             ✓              ✓
 ```
 
-We can then construct a curve:
+The exact budgets will be determined after establishing the benchmark.
+
+---
+
+# Information-Type Benchmark
+
+A central part of the evaluation should explicitly separate information types.
+
+## Semantic Questions
+
+Example:
+
+> What is the purpose of the authentication module?
+
+---
+
+## Structural Questions
+
+Example:
+
+> Which modules call `AuthService`?
+
+---
+
+## Symbolic Questions
+
+Example:
+
+> What is the exact name of the token validation function?
+
+---
+
+## Literal Questions
+
+Example:
+
+> What timeout value is configured?
+
+---
+
+## Behavioral Questions
+
+Example:
+
+> What happens when token verification fails?
+
+---
+
+## Relational Questions
+
+Example:
+
+> How is `UserService` connected to the authentication subsystem?
+
+---
+
+This allows us to determine not only whether the model succeeds, but **which kinds of information each memory architecture preserves**.
+
+---
+
+# Counterfactual Evaluation
+
+A major concern in latent communication is that a receiver may produce a plausible answer without actually using the encoded information.
+
+For example:
 
 ```text
-Reasoning Quality
-      │
-      │                ______
-      │           ____/
-      │       ___/
-      │   ___/
-      │__/
-      └──────────────────────
-          Latent capacity
+Code A:
+MAX_RETRIES = 3
+
+Code B:
+MAX_RETRIES = 10
 ```
 
-The interesting question is whether there is a point of diminishing returns.
+Only one fact changes.
 
-If increasing the number of latent tokens produces little additional performance, this could indicate that the model has reached a practical information capacity for the task.
+The system produces:
+
+```text
+Memory A
+Memory B
+```
+
+and we measure:
+
+- latent distance;
+- receiver output;
+- answer probability;
+- relevant feature changes.
+
+If the answer remains unchanged despite the source fact changing, the memory system may have failed to encode that information.
+
+Counterfactual tests therefore provide stronger evidence than accuracy alone.
+
+---
+
+# Receiver Prior Tests
+
+Suppose the receiver answers:
+
+> `Authentication is implemented by validate_token().`
+
+There are at least two explanations.
+
+### Genuine information transfer
+
+The encoder transmitted enough information to identify the function.
+
+### Receiver prior
+
+The receiver generated a plausible answer based on patterns already present in its pretrained knowledge.
+
+The project therefore needs controlled tests where:
+
+- identifiers are randomized;
+- function names are unusual;
+- repository-specific constants are changed;
+- semantically equivalent implementations use different symbols.
+
+This helps determine whether the receiver actually depends on repository memory.
+
+---
+
+# Cross-Receiver Transfer
+
+Another important experiment is to test whether memory is tied to a specific receiver.
+
+```text
+                  Encoder
+                     │
+                     ▼
+                Shared Memory
+                /     |      \
+               /      |       \
+              ▼       ▼        ▼
+           Model A  Model B  Model C
+```
+
+The encoder can be trained with one receiver and evaluated with another.
+
+Questions:
+
+- Does semantic memory transfer?
+- Does structural memory transfer?
+- Does symbolic memory transfer?
+- Which representations are receiver-dependent?
+- Does adaptive routing generalize?
+
+A successful cross-receiver representation would provide evidence that the memory contains reusable information rather than merely encoding a private interface between two models.
+
+---
+
+# Latent Intervention
+
+Where possible, the project can investigate causal relationships between latent features and outputs.
+
+Conceptually:
+
+```text
+Original memory
+      │
+      ▼
+Receiver
+      │
+      ▼
+Answer
+
+        vs.
+
+Intervened memory
+      │
+      ▼
+Receiver
+      │
+      ▼
+Changed Answer?
+```
+
+If controlled modifications to a memory component systematically affect the corresponding task output, this provides stronger evidence that the representation contains task-relevant information.
+
+This should be treated as an advanced research direction rather than a prerequisite for the first prototype.
+
+---
+
+# Ablation Studies
+
+Ablation is essential.
+
+Possible experiments include:
+
+### Remove semantic memory
+
+```text
+Structural + Symbolic
+```
+
+### Remove structural memory
+
+```text
+Semantic + Symbolic
+```
+
+### Remove symbolic memory
+
+```text
+Semantic + Structural
+```
+
+### Disable adaptive routing
+
+```text
+Static allocation
+```
+
+### Disable progressive disclosure
+
+```text
+Full budget immediately
+```
+
+### Replace latent semantic memory
+
+```text
+Latent → text summary
+```
+
+### Remove query conditioning
+
+```text
+Same memory allocation for every question
+```
+
+These experiments allow us to identify where performance actually comes from.
 
 ---
 
@@ -528,119 +1118,92 @@ If increasing the number of latent tokens produces little additional performance
 
 Failure is an explicit part of the research.
 
-Possible failure modes include:
+Possible outcomes include:
 
 ### Semantic collapse
 
-The representation preserves only broad concepts.
+Semantic memory preserves only broad concepts.
 
-```text
-"authentication exists"
-```
+### Structural collapse
 
-but loses how authentication actually works.
+The model knows individual components but loses relationships.
 
-### Identifier loss
+### Symbolic loss
 
-The system understands a function's purpose but cannot recover its exact name.
+Exact identifiers and literals disappear.
 
-### Structural loss
+### Router collapse
 
-The model knows what individual modules do but loses relationships between them.
+The adaptive router learns to allocate almost all capacity to one memory type.
 
-### Literal loss
+### Budget misallocation
 
-Exact constants, strings or configuration values disappear.
+The router allocates information to a representation that is not useful for the current question.
 
 ### Receiver prior dominance
 
-The receiver may generate plausible answers based on its pretrained knowledge rather than information actually transmitted through the latent representation.
+The receiver answers from pretrained knowledge rather than repository memory.
 
-### Hallucination
+### Representation entanglement
 
-The receiver may produce convincing but unsupported answers.
+Different information types cannot be cleanly separated.
 
-### Bottleneck saturation
+### Cross-receiver incompatibility
 
-Increasing latent capacity may stop improving performance.
+Memory works only with the receiver used during training.
 
-### Repository memorization
+### Progressive-disclosure overhead
 
-The system may perform well on familiar repositories but fail to generalize to unseen code.
+The cost of requesting additional memory exceeds the savings.
 
-These failure modes will be explicitly tested rather than hidden.
+### Retrieval dominance
 
----
+A conventional retrieval system remains more effective at the same computational budget.
 
-# A Particularly Important Research Problem
-
-One of the most interesting questions is whether successful answers actually come from the latent representation.
-
-Suppose the receiver answers:
-
-> "Authentication is handled by `validate_token()`."
-
-There are at least two possibilities.
-
-### Case A — genuine latent information
-
-The encoder transmitted information identifying `validate_token`.
-
-### Case B — pretrained prior
-
-The receiver generated a plausible answer because the name or pattern is common in its training distribution.
-
-These are fundamentally different outcomes.
-
-Therefore, the project should investigate not only:
-
-> **Does the model answer correctly?**
-
-but also:
-
-> **Where did the information required for the answer come from?**
-
-This can motivate controlled probes, counterfactual experiments and receiver-side analysis.
+Any of these results can be scientifically useful.
 
 ---
 
-# Information Bottleneck Perspective
+# What Makes This Different
 
-The project can be viewed as an information bottleneck problem.
+The project is not based on the assumption that:
 
-We have:
+> "Latent tokens are better than text."
+
+Instead, it investigates:
+
+> **"Does the type of representation matter when the information budget is constrained?"**
+
+The core comparison is therefore:
 
 ```text
-              Large information source
-                       │
-                       ▼
-                  Repository
-                       │
-                       ▼
-                    Encoder
-                       │
-                       ▼
-              ┌────────────────┐
-              │ Latent channel │
-              │    K tokens    │
-              └────────────────┘
-                       │
-                       ▼
-                   Receiver
-                       │
-                       ▼
-                 Task output
+Monolithic Memory
+       │
+       ▼
+One representation
+       │
+       ▼
+One bottleneck
+
+
+            VS
+
+
+Heterogeneous Memory
+       │
+ ┌─────┼─────┐
+ ▼     ▼     ▼
+Sem.  Struct. Sym.
+ │     │     │
+ └─────┼─────┘
+       ▼
+Adaptive allocation
+       │
+       ▼
+Same total budget
 ```
 
-The channel has limited capacity.
-
-We want to understand:
-
-> What information survives when the communication channel becomes increasingly constrained?
-
-This makes the project broader than code completion or repository search.
-
-Code is the experimental domain in which we study latent communication.
+This gives the project a falsifiable research hypothesis rather than simply another architecture.
 
 ---
 
@@ -649,115 +1212,176 @@ Code is the experimental domain in which we study latent communication.
 This project is not intended to be:
 
 - another ChatGPT clone;
-- another code autocomplete model;
+- another generic coding assistant;
 - another simple RAG wrapper;
-- a vector database tutorial;
-- a prompt-engineering project;
-- a generic "AI coding assistant";
-- a claim that latent representations automatically replace retrieval.
+- another vector database tutorial;
+- another prompt-engineering project;
+- another generic context compressor;
+- a claim that latent representations automatically replace retrieval;
+- a claim that deterministic symbolic memory is always superior;
+- a claim that heterogeneous memory will necessarily outperform existing methods.
 
-The purpose is to investigate a specific research question.
+The architecture is a hypothesis.
+
+The experiments determine whether it works.
 
 ---
 
 # Potential Applications
 
-If the approach proves useful, possible applications include:
+If the approach proves useful, potential applications include:
 
-### Persistent repository memory
+## Persistent Repository Memory
 
-A repository could be encoded once and represented by a compact learned memory.
+A codebase could be encoded into a compact heterogeneous memory and reused across sessions.
 
-### Long-running coding agents
+## Long-Running Coding Agents
 
-An agent could maintain a persistent representation of a codebase across interactions.
+Agents could maintain persistent representations of large codebases without repeatedly processing the entire repository.
 
-### Context reduction
+## Adaptive Context Reduction
 
-Repeatedly providing large source-code contexts could potentially be reduced.
+Simple questions could use very small information budgets while difficult questions receive additional information.
 
-### Multi-model communication
+## Multi-Model Communication
 
-One model could encode information into a latent representation consumed by another model.
+Different models could potentially consume the same repository memory.
 
-### Private or constrained communication
+## Repository Understanding
 
-A system could investigate whether useful semantic information can be transferred without directly exposing the original textual representation.
+The memory could act as a compact representation of semantic, structural, and symbolic knowledge.
 
-These are potential applications, not claims of demonstrated capability.
+These are potential applications, not demonstrated capabilities.
 
 ---
 
-# Research Contributions We Are Looking For
+# Potential Research Contributions
 
 The final contribution does not have to be a completely new neural architecture.
 
-A valuable result could instead be:
+Possible contributions include:
 
-### Contribution A
+### Contribution A — Heterogeneous Code Memory
 
-A new method for latent repository representation.
+A framework for separating semantic, structural, and symbolic repository knowledge.
 
-### Contribution B
+### Contribution B — Adaptive Information Allocation
 
-A systematic benchmark for code latent communication.
+A learned mechanism for allocating a fixed information budget between memory types.
 
-### Contribution C
+### Contribution C — Information-Budget Benchmark
 
-An analysis of what information survives latent compression.
+A benchmark that compares repository reasoning systems under controlled information budgets.
 
-### Contribution D
+### Contribution D — Information Retention Analysis
 
-A demonstrated compression/reasoning trade-off.
+A systematic study of which types of code knowledge survive different compression strategies.
 
-### Contribution E
+### Contribution E — Counterfactual Evaluation
 
-A discovery of a previously poorly understood failure mode.
+Methods for distinguishing genuine information transfer from receiver priors.
 
-### Contribution F
+### Contribution F — Cross-Receiver Analysis
 
-A better training objective for preserving code-specific information.
+An investigation of whether learned code memory is reusable across different receiver models.
 
-The final contribution will be determined by the experiments.
+### Contribution G — Negative Results
+
+A clear demonstration of where heterogeneous memory fails or provides no advantage.
+
+The final contribution will be determined by experimental evidence.
+
+---
+
+# Information Efficiency
+
+One of the central goals is to move beyond raw accuracy.
+
+Suppose two systems achieve:
+
+```text
+System A
+90% accuracy
+1000 information units
+
+System B
+88% accuracy
+128 information units
+```
+
+System B may be considerably more information-efficient.
+
+The project will therefore investigate metrics that relate:
+
+```text
+Task performance
+        ↕
+Information budget
+        ↕
+Computational cost
+```
+
+The final metric definition will be established before the main comparison to avoid optimizing the evaluation after seeing the results.
 
 ---
 
 # Research Workflow
 
-The project will follow a scientific workflow rather than immediately implementing a large system.
+The project follows a research workflow rather than immediately implementing the complete architecture.
 
 ```text
-Learn fundamentals
+Study fundamentals
         │
         ▼
-Read relevant research
+Literature / related-work audit
         │
         ▼
-Reproduce small ideas
+Define exact research gap
         │
         ▼
-Define hypothesis
+Build minimal monolithic latent baseline
         │
         ▼
-Build minimal prototype
+Build strong retrieval / compression baselines
         │
         ▼
-Establish baselines
+Define information budget
         │
         ▼
-Run experiments
+Introduce semantic memory
         │
         ▼
-Analyze failures
+Introduce structural memory
         │
         ▼
-Refine hypothesis
+Introduce symbolic memory
+        │
+        ▼
+Build static hybrid baseline
+        │
+        ▼
+Introduce adaptive routing
+        │
+        ▼
+Introduce progressive disclosure
         │
         ▼
 Run controlled experiments
         │
         ▼
+Counterfactual evaluation
+        │
+        ▼
+Cross-receiver experiments
+        │
+        ▼
 Ablation studies
+        │
+        ▼
+Failure analysis
+        │
+        ▼
+Refine hypothesis
         │
         ▼
 Final evaluation
@@ -769,18 +1393,26 @@ Technical report
 Open-source release
 ```
 
-The architecture is allowed to change during this process.
+The architecture is explicitly allowed to change during this process.
 
 ---
 
 # Expected Final Artifact
 
-The final project is expected to contain several components.
+The final project may contain:
 
 ```text
 Research Project
 │
-├── Neural model
+├── Memory architecture
+│
+├── Semantic encoder
+│
+├── Structural representation
+│
+├── Symbolic extraction
+│
+├── Adaptive router
 │
 ├── Training pipeline
 │
@@ -790,11 +1422,13 @@ Research Project
 │
 ├── Baselines
 │
-├── Experimental results
+├── Counterfactual tests
 │
 ├── Ablation studies
 │
-├── Analysis of failure modes
+├── Experimental results
+│
+├── Failure analysis
 │
 ├── Documentation
 │
@@ -803,9 +1437,9 @@ Research Project
 └── Open-source release
 ```
 
-A lightweight CLI or API may also be built if the research results justify it.
+A lightweight CLI or API may be added if the research results justify it.
 
-The CLI is a **demonstration and application layer**, not the primary contribution.
+The CLI is an application and demonstration layer, not the primary research contribution.
 
 ---
 
@@ -815,62 +1449,87 @@ Success does not necessarily mean:
 
 > "Our model beats every baseline."
 
-A successful research project could instead establish a clear and reproducible result such as:
+A successful result could instead establish:
 
-> A fixed latent bottleneck can preserve certain classes of repository-level information while achieving substantial compression, but exact identifier recovery degrades sharply below a particular capacity.
-
-Or:
-
-> Latent representations preserve semantic and architectural information significantly better than exact symbolic information.
+> Under the same information budget, heterogeneous memory preserves semantic, structural, and symbolic information more effectively than monolithic latent compression.
 
 Or:
 
-> A particular training objective substantially improves information retention under a fixed latent budget.
+> Adaptive allocation provides a measurable improvement over static allocation at the same total budget.
 
-Or even:
+Or:
 
-> Latent communication fails to compete with retrieval for exact code reasoning, but reveals a useful separation between semantic and symbolic information.
+> Semantic information benefits strongly from latent representations, while exact symbolic information is better preserved through deterministic representations.
 
-A well-supported negative result is preferable to an unsupported positive claim.
+Or:
+
+> Progressive disclosure reduces average information consumption without significantly reducing answer quality.
+
+Or:
+
+> Heterogeneous memory provides no overall improvement, but reveals a strong and reproducible separation between information types.
+
+Even a negative result can be valuable if the comparison is rigorous and reproducible.
 
 ---
 
 # Limitations
 
-This project will have important limitations.
+The proposed approach may have significant limitations.
 
-Latent representations may:
+It may:
 
-- lose exact information;
-- hallucinate;
-- depend heavily on the receiver model;
-- fail to generalize across programming languages;
-- struggle with large repositories;
-- require expensive training;
-- be difficult to interpret;
-- encode information that is inaccessible to standard decoding;
-- provide worse practical performance than strong retrieval systems.
+- require multiple encoders or processing stages;
+- introduce routing overhead;
+- be computationally more expensive than simple retrieval;
+- fail to define a fair common information budget;
+- produce incompatible representations;
+- lose information during semantic compression;
+- depend on receiver architecture;
+- require language-specific static analysis;
+- struggle with dynamic programming behavior;
+- fail on unfamiliar repositories;
+- provide worse latency than retrieval;
+- require substantial training data.
 
-These limitations will be reported explicitly.
+These limitations will be explicitly measured and reported.
 
 ---
 
 # Long-Term Vision
 
-The long-term goal is to investigate a broader question:
+The broader question behind this project is:
 
-> **Can neural models communicate complex structured knowledge through compact learned representations instead of transmitting the original representation directly?**
+> **Can structured knowledge be stored more efficiently when different kinds of information are represented according to their intrinsic properties rather than forced through a single learned representation?**
 
 Code is an especially useful domain for studying this question because it contains:
 
 - precise symbols;
 - hierarchical structure;
 - semantic relationships;
-- long-range dependencies;
+- dependency graphs;
 - executable behavior;
+- exact literals;
+- long-range dependencies;
 - both high-level and low-level information.
 
-If the project succeeds, it may provide insights not only into code intelligence but also into learned memory and communication between neural models.
+The project therefore sits at the intersection of:
+
+```text
+Code Intelligence
+       +
+Representation Learning
+       +
+Information Bottlenecks
+       +
+Learned Memory
+       +
+Neural Communication
+```
+
+The long-term goal is not simply to build a smaller context.
+
+It is to understand **how different kinds of knowledge should be represented and communicated when information is limited**.
 
 ---
 
@@ -878,31 +1537,39 @@ If the project succeeds, it may provide insights not only into code intelligence
 
 The project follows several principles.
 
-### 1. Evidence over intuition
+## 1. Evidence over intuition
 
 Interesting ideas must be experimentally tested.
 
-### 2. Baselines over isolated results
+## 2. Baselines over isolated results
 
 A number without a meaningful comparison is not enough.
 
-### 3. Negative results are valuable
+## 3. Equal-budget comparisons
 
-A failed hypothesis can reveal important properties of the system.
+Methods should be compared under controlled information and computational constraints whenever possible.
 
-### 4. Reproducibility over spectacle
+## 4. Negative results are valuable
+
+A failed hypothesis can reveal important properties of code representations and memory systems.
+
+## 5. Reproducibility over spectacle
 
 All important results should be reproducible.
 
-### 5. Understanding over implementation speed
+## 6. Deterministic tools where appropriate
 
-The project is also an educational journey.
+A neural network should not approximate information that deterministic program analysis can preserve exactly unless there is a research reason to do so.
 
-### 6. No predetermined conclusion
+## 7. Understanding over implementation speed
 
-We do not know what the final result will be.
+The project is also an educational research process.
 
-The research determines the conclusion.
+## 8. No predetermined conclusion
+
+We do not know whether adaptive heterogeneous memory will outperform existing methods.
+
+The experiments determine the conclusion.
 
 ---
 
@@ -912,41 +1579,96 @@ The research determines the conclusion.
 
 No experimental results are claimed at this stage.
 
-The architecture, datasets, latent capacity and evaluation methodology are expected to evolve as the research progresses.
+The exact memory representations, datasets, information-budget definition, routing mechanism, and evaluation methodology are expected to evolve as the research progresses.
 
 ---
 
 # Roadmap
 
+## Phase 1 — Foundations
+
 - [ ] Study Transformer internals
+- [ ] Study attention and KV-cache
 - [ ] Study representation learning
+- [ ] Study latent representations
 - [ ] Study information bottlenecks
-- [ ] Study Q-Former and related architectures
-- [ ] Study latent communication
-- [ ] Review related research
-- [ ] Define initial benchmark
-- [ ] Implement minimal prototype
-- [ ] Establish text and retrieval baselines
-- [ ] Train first latent model
-- [ ] Evaluate information retention
-- [ ] Perform bottleneck-size experiments
-- [ ] Perform ablation studies
-- [ ] Analyze failure modes
-- [ ] Refine architecture
-- [ ] Run final evaluation
-- [ ] Prepare technical report
-- [ ] Release code
-- [ ] Release model / artifacts
-- [ ] Publish research results
+- [ ] Study code representations
+- [ ] Study ASTs and static analysis
+- [ ] Study graph representations
+- [ ] Study context compression
+
+## Phase 2 — Research Audit
+
+- [ ] Review repository-level compression methods
+- [ ] Review latent-vector compression
+- [ ] Review code-specific compression
+- [ ] Review graph-based code memory
+- [ ] Review learned memory systems
+- [ ] Review adaptive information allocation
+- [ ] Identify the precise research gap
+- [ ] Define the initial hypothesis
+
+## Phase 3 — Baselines
+
+- [ ] Build full-context evaluation
+- [ ] Build retrieval baseline
+- [ ] Build text-compression baseline
+- [ ] Build monolithic latent baseline
+- [ ] Define information-budget methodology
+
+## Phase 4 — Heterogeneous Memory
+
+- [ ] Implement semantic memory
+- [ ] Implement structural memory
+- [ ] Implement symbolic memory
+- [ ] Build static hybrid baseline
+- [ ] Establish information-type benchmark
+
+## Phase 5 — Adaptive Memory
+
+- [ ] Implement query-conditioned routing
+- [ ] Implement adaptive budget allocation
+- [ ] Compare adaptive vs static allocation
+- [ ] Test different budget sizes
+- [ ] Measure information efficiency
+
+## Phase 6 — Advanced Experiments
+
+- [ ] Progressive information disclosure
+- [ ] Counterfactual evaluation
+- [ ] Receiver-prior tests
+- [ ] Latent interventions
+- [ ] Cross-receiver transfer
+- [ ] Cross-repository generalization
+
+## Phase 7 — Analysis
+
+- [ ] Ablation studies
+- [ ] Failure-mode analysis
+- [ ] Information-retention analysis
+- [ ] Computational efficiency analysis
+- [ ] Statistical significance / uncertainty analysis
+
+## Phase 8 — Release
+
+- [ ] Final evaluation
+- [ ] Technical report
+- [ ] Research documentation
+- [ ] Reproducible training scripts
+- [ ] Reproducible evaluation scripts
+- [ ] Model / artifacts release where appropriate
+- [ ] Open-source release
 
 ---
 
-# Final Question
+# Final Research Question
 
-The project ultimately asks a simple question with a difficult answer:
+The project ultimately asks:
 
-> **How much can a language model know about a codebase if we refuse to give it the code itself and allow it to receive only a small learned latent representation?**
+> **When the amount of information available to a language model is strictly limited, is it better to compress everything into one learned representation — or to represent semantic, structural, and symbolic knowledge differently and dynamically allocate the available information budget between them?**
 
-The goal is not merely to build a smaller context.
+The goal is not merely to build another code compressor.
 
-The goal is to understand the **limits of learned information compression and communication for code reasoning**.
+The goal is to investigate whether **heterogeneous, adaptive memory can make information-limited code reasoning more efficient, more reliable, and more interpretable than monolithic compression.**
+
+And regardless of the outcome, the project aims to produce a reproducible answer to that question.
